@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import io from "socket.io-client";
+import axios from "axios";
 
 const socket = io("http://localhost:5000");
 
@@ -39,12 +40,26 @@ function App() {
   };
 
   useEffect(() => {
+    fetchMessages();
+
     socket.on("receive_message", (data) => {
       setChat((prev) => [...prev, data]);
     });
 
     return () => socket.off("receive_message");
   }, []);
+
+  const fetchMessages = async () => {
+    try {
+      const response = await axios.get(
+        "http://localhost:5000/messages"
+      );
+
+      setChat(response.data);
+    } catch (error) {
+      console.log(error);
+    }
+  };
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
