@@ -2,28 +2,19 @@ import { useEffect, useState, useRef } from "react";
 import io from "socket.io-client";
 import axios from "axios";
 
-const socket = io("http://localhost:5000");
+import Auth from "./components/Auth";
+
+const socket = io("http://localhost:5001");
 
 function App() {
-  const [username, setUsername] = useState("");
-  const [joined, setJoined] = useState(false);
+  const [username, setUsername] = useState(
+    localStorage.getItem("username") || ""
+  );
 
   const [message, setMessage] = useState("");
   const [chat, setChat] = useState([]);
 
   const chatEndRef = useRef(null);
-
-  const joinChat = () => {
-    if (username.trim()) {
-      setJoined(true);
-
-      socket.emit("send_message", {
-        user: "System",
-        message: `${username} has joined the chat`,
-        time: new Date().toLocaleTimeString(),
-      });
-    }
-  };
 
   const sendMessage = () => {
     if (message.trim()) {
@@ -52,7 +43,7 @@ function App() {
   const fetchMessages = async () => {
     try {
       const response = await axios.get(
-        "http://localhost:5000/messages"
+        "http://localhost:5001/messages"
       );
 
       setChat(response.data);
@@ -65,29 +56,22 @@ function App() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 
-  if (!joined) {
-    return (
-      <div style={styles.joinContainer}>
-        <h2>Join Chat</h2>
-
-        <input
-          type="text"
-          placeholder="Enter username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          style={styles.input}
-        />
-
-        <button onClick={joinChat} style={styles.button}>
-          Join
-        </button>
-      </div>
-    );
+  if (!username) {
+    return <Auth setUsername={setUsername} />;
   }
 
   return (
     <div style={styles.container}>
       <h1>Real-Time Chat</h1>
+
+      <button
+        onClick={() => {
+          localStorage.clear();
+          setUsername("");
+        }}
+      >
+        Logout
+      </button>
 
       <div style={styles.chatBox}>
         {chat.map((msg, index) => (

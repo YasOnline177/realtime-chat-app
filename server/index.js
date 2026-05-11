@@ -3,12 +3,16 @@ const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const Message = require("./models/Message");
+const User = require("./models/User");
 
 const app = express();
 
+app.use(express.json());
 app.use(cors());
 
 mongoose.connect(process.env.MONGO_URI).then(() => console.log("MongoDB connected")).catch((err) => console.log(err));
@@ -25,7 +29,6 @@ const io = new Server(server, {
 app.get("/messages", async (req, res) => {
     try {
         const messages = await Message.find();
-
         res.json(messages);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -38,9 +41,7 @@ io.on("connection", (socket) => {
     socket.on("send_message", async (data) => {
         try {
             const newMessage = new Message(data);
-
             await newMessage.save();
-
             io.emit("receive_message", data);
         } catch (error) {
             console.log(error);
@@ -52,8 +53,79 @@ io.on("connection", (socket) => {
     });
 });
 
-const PORT = process.env.PORT || 5000;
+app.post("/register", async (req, res) => {
+    try {
+        const { username, password } = req.body;
 
-server.listen(5000, () => {
+        const existingUser = await User.findOne({ username });
+
+        if (existingUser) {
+            return res.status(400).json({
+                message: "User already exists"
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const newUser = new User({
+            username,
+            password: hashedPassword
+        });
+
+        await newUser.save();
+
+        res.status(201).json({
+            message: "User registered successfully"
+        });
+    } catch (error) {
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
+
+app.post("/login", async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        const user = await User.findOne({ username });
+
+        if (!user) {
+            return res.status(400).json({
+                message: "Invalid credentials"
+            });
+        }
+
+        const isMatch = await bcrypt.compare(
+            password,
+            user.password
+        );
+
+        if (!isMatch) {
+            return res.status(400).json({
+                message: "Invalid credentials"
+            });
+        }
+
+        const token = jwt.sign(
+            { id: user._id, username: user.username },
+            process.env.JWT_SECRET,
+            { expiresIn: "1d" }
+        );
+
+        res.json({
+            token,
+            username: user.username
+        });
+    } catch (error) {
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
+
+const PORT = process.env.PORT || 5001;
+
+server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
