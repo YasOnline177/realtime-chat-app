@@ -13,6 +13,9 @@ function App() {
 
   const [message, setMessage] = useState("");
   const [chat, setChat] = useState([]);
+  const [typingUser, setTypingUser] = useState("");
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [room, setRoom] = useState("general");
 
   const chatEndRef = useRef(null);
 
@@ -22,6 +25,7 @@ function App() {
         user: username,
         message,
         time: new Date().toLocaleTimeString(),
+        room
       };
 
       socket.emit("send_message", messageData);
@@ -33,11 +37,35 @@ function App() {
   useEffect(() => {
     fetchMessages();
 
+    socket.emit("join_chat", username);
+
     socket.on("receive_message", (data) => {
       setChat((prev) => [...prev, data]);
+
+      if (data.user !== username && Notification.permission === "granted" && document.hidden) {
+        new Notification(`${data.user}`, {
+          body: data.message
+        });
+      }
     });
 
-    return () => socket.off("receive_message");
+    socket.on("show_typing", (user) => {
+      setTypingUser(user);
+      
+      setTimeout(() => {
+        setTypingUser("");
+      }, 2000);
+    });
+
+    socket.on("online_users", (users) => {
+      setOnlineUsers(users);
+    });
+
+    return () => {
+      socket.off("receive_message");
+      socket.off("show_typing");
+      socket.off("online_users");
+    };
   }, []);
 
   const fetchMessages = async () => {
@@ -53,6 +81,10 @@ function App() {
   };
 
   useEffect(() => {
+    socket.emit("join_room", room);
+  }, [room]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
 
@@ -66,6 +98,14 @@ function App() {
 
       <button
         onClick={() => {
+          Notification.requestPermission();
+        }}
+      >
+        Enable Notifications
+      </button>
+
+      <button
+        onClick={() => {
           localStorage.clear();
           setUsername("");
         }}
@@ -73,8 +113,25 @@ function App() {
         Logout
       </button>
 
+      <h3>Online Users</h3>
+
+      <ul>
+        {onlineUsers.map((user, index) => (
+          <li key={index}>{user}</li>
+        ))}
+      </ul>
+
+      <select 
+        value={room}
+        onChange={(e) => setRoom(e.target.value)}
+      >
+        <option value="general">General</option>
+        <option value="study">Study</option>
+        <option value="project">Project</option>
+      </select>
+
       <div style={styles.chatBox}>
-        {chat.map((msg, index) => (
+        {chat.filter((msg) => msg.room === room).map((msg, index) => (
           <div
             key={index}
             style={{
@@ -94,12 +151,20 @@ function App() {
         <div ref={chatEndRef}></div>
       </div>
 
+      <p>{typingUser && `${typingUser} is typing...`}</p>
+
       <div style={styles.inputArea}>
         <input 
           type="text" 
           placeholder="Type message..." 
           value={message} 
-          onChange={(e) => setMessage(e.target.value)} 
+          onChange={(e) => {
+            setMessage(e.target.value);
+            socket.emit("typing", {
+              user: username,
+              room
+            });
+          }} 
         />
 
         <button onClick={sendMessage} style={styles.button}>

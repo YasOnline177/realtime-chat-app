@@ -14,6 +14,11 @@ const messageSchema = new mongoose.Schema({
     time: {
         type: String,
         required: true
+    },
+
+    room: {
+        type: String,
+        required: true
     }
 });
 

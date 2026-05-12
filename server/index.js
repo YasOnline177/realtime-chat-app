@@ -10,6 +10,8 @@ require("dotenv").config();
 const Message = require("./models/Message");
 const User = require("./models/User");
 
+let onlineUsers = [];
+
 const app = express();
 
 app.use(express.json());
@@ -42,13 +44,45 @@ io.on("connection", (socket) => {
         try {
             const newMessage = new Message(data);
             await newMessage.save();
-            io.emit("receive_message", data);
+            io.to(data.room).emit("receive_message", data);
         } catch (error) {
             console.log(error);
         }
     });
 
+    socket.on("typing", ({ user, room }) => {
+        socket.to(room).emit("show_typing", user);
+    });
+
+    socket.on("join_chat", (username) => {
+        socket.username = username;
+        
+        if (!onlineUsers.includes(username)) {
+            onlineUsers.push(username);
+        }
+
+        io.emit("online_users", onlineUsers);
+    })
+
+    socket.on("join_room", (room) => {
+        const rooms = Array.from(socket.rooms);
+
+        rooms.forEach((joinedRoom) => {
+            if (joinedRoom !== socket.id) {
+                socket.leave(joinedRoom);
+            }
+        });
+
+        socket.join(room);
+
+        console.log(`User joined room: ${room}`);
+    });
+
     socket.on("disconnect", () => {
+        onlineUsers = onlineUsers.filter(
+            (user) => user !== socket.username
+        );
+        io.emit("online_users", onlineUsers);
         console.log(`User disconnected: ${socket.id}`);
     });
 });
