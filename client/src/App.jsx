@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import io from "socket.io-client";
 import axios from "axios";
 
@@ -34,15 +34,20 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    fetchMessages();
+  const usernameRef = useRef(username);
 
+  useEffect(() => {
+    usernameRef.current = username;
+  }, [username]);
+
+  useEffect(() => {
+    if (!username) return;
     socket.emit("join_chat", username);
 
     socket.on("receive_message", (data) => {
       setChat((prev) => [...prev, data]);
 
-      if (data.user !== username && Notification.permission === "granted" && document.hidden) {
+      if (data.user !== usernameRef.current && Notification.permission === "granted" && document.hidden) {
         new Notification(`${data.user}`, {
           body: data.message
         });
@@ -51,10 +56,7 @@ function App() {
 
     socket.on("show_typing", (user) => {
       setTypingUser(user);
-      
-      setTimeout(() => {
-        setTypingUser("");
-      }, 2000);
+      setTimeout(() => setTypingUser(""), 2000);
     });
 
     socket.on("online_users", (users) => {
@@ -66,23 +68,27 @@ function App() {
       socket.off("show_typing");
       socket.off("online_users");
     };
-  }, []);
+  }, [username]);
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback(async () => {
     try {
-      const response = await axios.get(
-        "http://localhost:5001/messages"
-      );
-
+      const token = localStorage.getItem("token");
+      const response = await axios.get("http://localhost:5001/messages", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        params: { room }  // Send room as query parameter
+      });
       setChat(response.data);
     } catch (error) {
       console.log(error);
     }
-  };
+  }, [room]); // re-create when room changes
 
   useEffect(() => {
     socket.emit("join_room", room);
-  }, [room]);
+    fetchMessages();  // Reload messages for the new room
+  }, [room, fetchMessages]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -131,7 +137,7 @@ function App() {
       </select>
 
       <div style={styles.chatBox}>
-        {chat.filter((msg) => msg.room === room).map((msg, index) => (
+        {chat.map((msg, index) => (
           <div
             key={index}
             style={{
@@ -164,7 +170,11 @@ function App() {
               user: username,
               room
             });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") sendMessage();
           }} 
+          style={styles.input}
         />
 
         <button onClick={sendMessage} style={styles.button}>

@@ -28,9 +28,29 @@ const io = new Server(server, {
     },
 });
 
-app.get("/messages", async (req, res) => {
+// JWT Auth Middleware
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers["authorization"];
+    const token = authHeader && authHeader.split(" ")[1];   // Bearer TOKEN
+
+    if (!token) {
+        return res.status(401).json({ message: "Access denied. No token." });
+    }
+
     try {
-        const messages = await Message.find();
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = verified;
+        next();
+    } catch (error) {
+        res.status(403).json({ message: "Invalid token." });
+    }
+};
+
+app.get("/messages", authenticateToken, async (req, res) => {
+    try {
+        const { room } = req.query; // Get room from query parameters
+        const filter = room ? { room } : {};
+        const messages = await Message.find(filter).limit(50);  
         res.json(messages);
     } catch (error) {
         res.status(500).json({ error: error.message });
