@@ -11,6 +11,12 @@ const ROOMS = [
   { id: "project", label: "Project", icon: "◆" },
 ];
 
+const EMOJIS = [
+  "😀","😂","😍","🥹","😎","😭","🤯","🥳","😴","🤔",
+  "👍","👎","❤️","🔥","💯","🎉","✅","🚀","💀","👀",
+  "😤","🫡","🤝","🙏","👏","💪","🫶","😈","🤡","💅",
+]
+
 function getInitials(name) {
   return name?.slice(0, 2).toUpperCase() || "??";
 }
@@ -51,6 +57,24 @@ function TypingDots() {
   );
 }
 
+function EmojiPicker({ onSelect, onClose }) {
+  return (
+    <div style={emojiStyles.backdrop} onClick={onClose}>
+      <div style={emojiStyles.panel} onClick={(e) => e.stopPropagation()}>
+        {EMOJIS.map((emoji, i) => (
+          <button
+            key={i}
+            onClick={() => onSelect(emoji)}
+            style={emojiStyles.emojiBtn}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [username, setUsername] = useState(localStorage.getItem("username") || "");
   const [message, setMessage] = useState("");
@@ -58,6 +82,7 @@ export default function App() {
   const [typingUser, setTypingUser] = useState("");
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [room, setRoom] = useState("general");
+  const [showEmoji, setShowEmoji] = useState(false);
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
@@ -228,7 +253,30 @@ export default function App() {
         </div>
 
         {/* Input */}
+        {showEmoji && (
+          <EmojiPicker
+            onSelect={(emoji) => {
+              setMessage(prev => prev + emoji);
+              inputRef.current?.focus();
+            }}
+            onClose={() => setShowEmoji(false)}
+          />
+        )}
+
         <div style={s.inputBar}>
+          <button
+            onClick={() => setShowEmoji(prev => !prev)}
+            style={{
+              ...s.sendBtn,
+              background: showEmoji ? "var(--accent-dim)" : "var(--bg-elevated)",
+              color: "var(--text-primary)",
+              fontSize: 18,
+              border: "1px solid var(--border)"
+            }}
+            title="Emoji"
+          >
+            😊
+          </button>
           <input
             ref={inputRef}
             value={message}
@@ -379,4 +427,30 @@ const s = {
     fontSize: 16, cursor: "pointer", fontWeight: 700,
     transition: "opacity 0.2s", flexShrink: 0,
   },
+};
+
+const emojiStyles = {
+  backdrop: {
+    position: "fixed", inset: 0, zIndex: 100
+  },
+  panel: {
+    position: "absolute",
+    bottom: 80, left: 240,
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    borderRadius: 14, 
+    padding: 12,
+    display: "grid",
+    gridTemplateColumns: "repeat(10, 1fr)",
+    gap: 4,
+    boxShadow: "0, 8px, 32px, #00000066",
+    zIndex: 101
+  },
+  emojiBtn: {
+    background: "none", border: "none",
+    fontSize: 20, cursor: "pointer",
+    padding: "4px 2px", borderRadius: 6,
+    transition: "transform 0.1s",
+    lineHeight: 1
+  }
 };
