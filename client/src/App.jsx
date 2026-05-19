@@ -83,18 +83,33 @@ export default function App() {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [room, setRoom] = useState("general");
   const [showEmoji, setShowEmoji] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({ general: 0, study: 0, project: 0 });
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
+  const roomRef = useRef(room);
 
   useEffect(() => { usernameRef.current = username; }, [username]);
+  useEffect(() => { roomRef.current = room; }, [room]);
 
   useEffect(() => {
     if (!username) return;
     socket.emit("join_chat", username);
 
+    ROOMS.forEach(r => socket.emit("join_room", r.id));
+
     socket.on("receive_message", (data) => {
-      setChat(prev => [...prev, data]);
+      if (data.room === roomRef.current) {
+        // Only add to chat if it's the current room
+        setChat(prev => [...prev, data]);
+      } else {
+        // Increment unread for other rooms
+        setUnreadCounts(prev => ({
+          ...prev,
+          [data.room]: (prev[data.room] || 0) + 1
+        }));
+      }
+
       if (data.user !== usernameRef.current && Notification.permission === "granted" && document.hidden) {
         new Notification(data.user, { body: data.message });
       }
@@ -113,6 +128,7 @@ export default function App() {
   }, [username]);
 
   const fetchMessages = useCallback(async () => {
+    setChat([]);
     try {
       const token = localStorage.getItem("token");
       const res = await axios.get("http://localhost:5001/messages", {
@@ -124,9 +140,11 @@ export default function App() {
   }, [room]);
 
   useEffect(() => {
-    socket.emit("join_room", room);
+    if (!username) return;
     fetchMessages();
-  }, [room, fetchMessages]);
+    // Clear unread for the room just entered
+    setUnreadCounts(prev => ({ ...prev, [room]: 0 }));
+  }, [room, fetchMessages, username]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -171,7 +189,9 @@ export default function App() {
             >
               <span style={s.roomIcon}>{r.icon}</span>
               {r.label}
-              {r.id === room && <span style={s.activePip} />}
+              {r.id === room ? <span style={s.activePip} /> : unreadCounts[r.id] > 0 && (
+                <span style={s.badge}>{unreadCounts[r.id]}</span>
+              )}
             </button>
           ))}
 
@@ -210,9 +230,9 @@ export default function App() {
             <span style={s.headerIcon}>{currentRoom?.icon}</span>
             <div>
               <p style={s.headerRoom}>{currentRoom?.label}</p>
-              <p style={s.headerSub}>
+              <div style={s.headerSub}>
                 {typingUser ? <><TypingDots /><span style={{ marginLeft: 6, color: "var(--accent)", fontSize: 12 }}>{typingUser} is typing</span></> : `${onlineUsers.length} online`}
-              </p>
+              </div>
             </div>
           </div>
           <button
@@ -427,6 +447,17 @@ const s = {
     fontSize: 16, cursor: "pointer", fontWeight: 700,
     transition: "opacity 0.2s", flexShrink: 0,
   },
+  badge: {
+    marginLeft: "auto",
+    background: "var(--danger)",
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: 600,
+    borderRadius: 20,
+    padding: "1px 6px", 
+    minWidth: 18,
+    textAlign: "center"
+  }
 };
 
 const emojiStyles = {
@@ -443,7 +474,7 @@ const emojiStyles = {
     display: "grid",
     gridTemplateColumns: "repeat(10, 1fr)",
     gap: 4,
-    boxShadow: "0, 8px, 32px, #00000066",
+    boxShadow: "0 8px 32px #00000066",
     zIndex: 101
   },
   emojiBtn: {

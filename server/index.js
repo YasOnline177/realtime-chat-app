@@ -50,7 +50,7 @@ app.get("/messages", authenticateToken, async (req, res) => {
     try {
         const { room } = req.query; // Get room from query parameters
         const filter = room ? { room } : {};
-        const messages = await Message.find(filter).limit(50);  
+        const messages = await Message.find(filter).sort({ createdAt: 1 }).limit(50);  
         res.json(messages);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -85,16 +85,7 @@ io.on("connection", (socket) => {
     })
 
     socket.on("join_room", (room) => {
-        const rooms = Array.from(socket.rooms);
-
-        rooms.forEach((joinedRoom) => {
-            if (joinedRoom !== socket.id) {
-                socket.leave(joinedRoom);
-            }
-        });
-
         socket.join(room);
-
         console.log(`User joined room: ${room}`);
     });
 
