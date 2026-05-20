@@ -15,6 +15,11 @@ const messageSchema = new mongoose.Schema({
     room: {
         type: String,
         required: true
+    },
+    reactions: {
+        type: Map,
+        of: [String],
+        default: {}
     }
 }, { timestamps: true });
 

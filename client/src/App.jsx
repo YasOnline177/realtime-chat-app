@@ -15,7 +15,9 @@ const EMOJIS = [
   "😀","😂","😍","🥹","😎","😭","🤯","🥳","😴","🤔",
   "👍","👎","❤️","🔥","💯","🎉","✅","🚀","💀","👀",
   "😤","🫡","🤝","🙏","👏","💪","🫶","😈","🤡","💅",
-]
+];
+
+const QUICK_REACTIONS = ["👍","❤️","😂","🔥","😮","👏"];
 
 function getInitials(name) {
   return name?.slice(0, 2).toUpperCase() || "??";
@@ -84,6 +86,8 @@ export default function App() {
   const [room, setRoom] = useState("general");
   const [showEmoji, setShowEmoji] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({ general: 0, study: 0, project: 0 });
+  const [reactions, setReactions] = useState({});
+  const [hoverMsg, setHoverMsg] = useState(null);
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
@@ -119,6 +123,15 @@ export default function App() {
       setTimeout(() => setTypingUser(""), 2000);
     });
     socket.on("online_users", (users) => setOnlineUsers(users));
+    socket.on("reaction_updated", ({ messageId, reactions }) => {
+      setChat(prev => 
+        prev.map(msg => 
+          msg._id === messageId
+            ? { ...msg, reactions }
+            : msg
+        )
+      );
+    });
 
     return () => {
       socket.off("receive_message");
@@ -128,7 +141,6 @@ export default function App() {
   }, [username]);
 
   const fetchMessages = useCallback(async () => {
-    setChat([]);
     try {
       const token = localStorage.getItem("token");
       const res = await axios.get("http://localhost:5001/messages", {
@@ -144,6 +156,7 @@ export default function App() {
     fetchMessages();
     // Clear unread for the room just entered
     setUnreadCounts(prev => ({ ...prev, [room]: 0 }));
+    setReactions({});
   }, [room, fetchMessages, username]);
 
   useEffect(() => {
@@ -160,6 +173,14 @@ export default function App() {
     });
     setMessage("");
     inputRef.current?.focus();
+  };
+
+  const toggleReaction = (messageId, emoji) => {
+    socket.emit("toggle_reaction", {
+      messageId,
+      emoji,
+      username
+    });
   };
 
   if (!username) return <Auth setUsername={setUsername} />;
@@ -255,14 +276,59 @@ export default function App() {
 
           {chat.map((msg, i) => {
             const isSelf = msg.user === username;
+            const msgReactions = msg.reactions || {};
+            
             return (
-              <div key={i} style={{ ...s.msgRow, justifyContent: isSelf ? "flex-end" : "flex-start" }}>
+              <div key={i} style={{ ...s.msgRow, justifyContent: isSelf ? "flex-end" : "flex-start" }} onMouseEnter={() => setHoverMsg(i)} onMouseLeave={() => setHoverMsg(null)} >
                 {!isSelf && <Avatar name={msg.user} size={30} />}
-                <div style={{ maxWidth: "65%", display: "flex", flexDirection: "column", gap: 3, alignItems: isSelf ? "flex-end" : "flex-start" }}>
+
+                <div style={{ maxWidth: "65%", display: "flex", flexDirection: "column", gap: 3, alignItems: isSelf ? "flex-end" : "flex-start", position: "relative" }}>
                   {!isSelf && <span style={s.msgAuthor}>{msg.user}</span>}
+
+                  {/* Reaction bar */}
+                  {hoverMsg === i && (
+                    <div style={{
+                      ...s.reactionBar,
+                      right: isSelf ? "auto" : undefined,
+                      left: isSelf ? "auto" : undefined,
+                      alignSelf: isSelf ? "flex-end" : "flex-start"
+                    }}>
+                      {QUICK_REACTIONS.map(emoji => (
+                        <button
+                          key={emoji}
+                          style={s.reactionPickBtn}
+                          onClick={() => toggleReaction(msg._id, emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Bubble */}
                   <div style={{ ...s.bubble, ...(isSelf ? s.bubbleSelf : s.bubbleOther) }}>
                     {msg.message}
                   </div>
+
+                  {/* Reaction chip below bubble */}
+                  {Object.keys(msgReactions).length > 0 && (
+                    <div style={s.reactionChips}>
+                      {Object.entries(msgReactions).filter(([emoji, users]) => users.length > 0).map(([emoji, users]) => (
+                        <span
+                          key={emoji}
+                          style={{
+                            ...s.reactionChip,
+                            borderColor: users.includes(username) ? "var(--accent)" : undefined,
+                            color: users.includes(username) ? "var(--accent)" : undefined
+                          }}
+                          onClick={() => toggleReaction(msg._id, emoji)}
+                        >
+                          {emoji} {users.length}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <span style={s.msgTime}>{msg.time}</span>
                 </div>
                 {isSelf && <Avatar name={msg.user} size={30} />}
@@ -457,6 +523,32 @@ const s = {
     padding: "1px 6px", 
     minWidth: 18,
     textAlign: "center"
+  },
+  reactionBar: {
+    display: "flex", gap: 2,
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    borderRadius: 20, padding: "3px 6px",
+    boxShadow: "0 4px 12px #00000044",
+    zIndex: 10, marginBottom: 4
+  },
+  reactionPickBtn: {
+    background: "none", border: "none",
+    fontSize: 16, cursor: "pointer", 
+    padding: "2px 4px", borderRadius: 6,
+    transition: "transform 0.1s",
+    lineHeight: 1
+  },
+  reactionChips: {
+    display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2
+  },
+  reactionChip: {
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    borderRadius: 20, padding: "2px 8px",
+    fontSize: 12, cursor: "pointer",
+    display: "flex", alignItems: "center", gap: 3,
+    transition: "border-color 0.15s"
   }
 };
 
