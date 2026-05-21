@@ -11,6 +11,7 @@ const Message = require("./models/Message");
 const User = require("./models/User");
 
 let onlineUsers = [];
+const userSockets = {};
 
 const app = express();
 
@@ -49,6 +50,10 @@ const authenticateToken = (req, res, next) => {
   }
 };
 
+function getDMRoom(userA, userB) {
+  return "dm_" + [userA, userB].sort().join("_");
+}
+
 app.get("/messages", authenticateToken, async (req, res) => {
   try {
     const { room } = req.query; // Get room from query parameters
@@ -69,7 +74,19 @@ io.on("connection", (socket) => {
     try {
       const newMessage = new Message(data);
       await newMessage.save();
-      io.to(data.room).emit("receive_message", newMessage);
+      if (data.room.startsWith("dm_")) {
+        const users = data.room.replace("dm_", "").split("_");
+
+        users.forEach((username) => {
+          const socketId = userSockets[username];
+
+          if (socketId) {
+            io.to(socketId).emit("receive_message", newMessage);
+          }
+        });
+      } else {
+        io.to(data.room).emit("receive_message", newMessage);
+      }
     } catch (error) {
       console.log(error);
     }
@@ -87,7 +104,7 @@ io.on("connection", (socket) => {
       const hasReacted = users.includes(username);
 
       const updated = hasReacted
-        ? users.filter(u => u !== username)
+        ? users.filter((u) => u !== username)
         : [...users, username];
 
       message.reactions.set(emoji, updated);
@@ -109,6 +126,7 @@ io.on("connection", (socket) => {
 
   socket.on("join_chat", (username) => {
     socket.username = username;
+    userSockets[username] = socket.id;
 
     if (!onlineUsers.includes(username)) {
       onlineUsers.push(username);
@@ -122,7 +140,25 @@ io.on("connection", (socket) => {
     console.log(`User joined room: ${room}`);
   });
 
+  socket.on("join_dm", ({ from, to }) => {
+    const dmRoom = getDMRoom(from, to);
+    socket.join(dmRoom);
+
+    // Find target user's socket and join them too
+    const targetSocketId = userSockets[to];
+    if (targetSocketId) {
+      const targetSocket = io.sockets.sockets.get(targetSocketId);
+      if (targetSocket) {
+        targetSocket.join(dmRoom);
+        // Notify target of incoming DM
+        targetSocket.emit("incoming_dm", { from, dmRoom });
+      }
+    }
+    console.log(`${from} joined DM room: ${dmRoom}`);
+  });
+
   socket.on("disconnect", () => {
+    delete userSockets[socket.username];
     onlineUsers = onlineUsers.filter((user) => user !== socket.username);
     io.emit("online_users", onlineUsers);
     console.log(`User disconnected: ${socket.id}`);

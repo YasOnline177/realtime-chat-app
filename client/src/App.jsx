@@ -77,6 +77,10 @@ function EmojiPicker({ onSelect, onClose }) {
   );
 }
 
+function getDMRoom(userA, userB) {
+  return "dm_" + [userA, userB].sort().join("_");
+}
+
 export default function App() {
   const [username, setUsername] = useState(localStorage.getItem("username") || "");
   const [message, setMessage] = useState("");
@@ -88,6 +92,8 @@ export default function App() {
   const [unreadCounts, setUnreadCounts] = useState({ general: 0, study: 0, project: 0 });
   const [reactions, setReactions] = useState({});
   const [hoverMsg, setHoverMsg] = useState(null);
+  const [activeDM] = useState(() => new Set()); // Track joined DM rooms
+  const [dmUser, setDmUser] = useState(null);
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
@@ -99,8 +105,14 @@ export default function App() {
   useEffect(() => {
     if (!username) return;
     socket.emit("join_chat", username);
-
     ROOMS.forEach(r => socket.emit("join_room", r.id));
+
+    const handleReconnect = () => {
+      socket.emit("join_chat", username);
+      ROOMS.forEach(r => socket.emit("join_room", r.id));
+    };
+
+    socket.on("connect", handleReconnect);
 
     socket.on("receive_message", (data) => {
       if (data.room === roomRef.current) {
@@ -132,11 +144,25 @@ export default function App() {
         )
       );
     });
+    socket.on("incoming_dm", ({ from, dmRoom }) => {
+      // Show notification
+      if (Notification.permission === "granted") {
+        new Notification(`💬 ${from}`, {body: "Sent you a private message" });
+      }
+      // Auto-join DM room so messages come through
+      socket.join && socket.emit("join_room", dmRoom);
+      setUnreadCounts(prev => ({
+        ...prev,
+        [dmRoom]: (prev[dmRoom] || 0) + 1,
+      }));
+    });
 
     return () => {
       socket.off("receive_message");
       socket.off("show_typing");
       socket.off("online_users");
+      socket.off("connect", handleReconnect);
+      socket.off("incoming_dm");
     };
   }, [username]);
 
@@ -183,6 +209,17 @@ export default function App() {
     });
   };
 
+  const openDM = (targetUser) => {
+    if (targetUser === username) return;  // Can't DM yourself
+    const dmRoom = getDMRoom(username, targetUser);
+    setDmUser(targetUser);
+    setRoom(dmRoom);
+    if (!activeDM.has(dmRoom)) {
+      socket.emit("join_dm", { from: username, to: targetUser });
+      activeDM.add(dmRoom);
+    }
+  };
+
   if (!username) return <Auth setUsername={setUsername} />;
 
   const currentRoom = ROOMS.find(r => r.id === room);
@@ -216,10 +253,33 @@ export default function App() {
             </button>
           ))}
 
+          {dmUser && (
+            <div style={{
+              background: "var(--accent-dim)",
+              border: "1px solid var(--accent-glow)",
+              borderRadius: 8, padding: "8px 10px",
+              marginBottom: 8, fontSize: 12, 
+              color: "var(--accent)",
+              display: "flex", alignItems: "center", gap: 6
+            }}>
+              <Avatar name={dmUser} size={20} />
+              <span style={{ flex: 1 }}>DM: {dmUser}</span>
+              {unreadCounts[getDMRoom(username, dmUser)] > 0 && (
+                <span style={s.badge}>
+                  {unreadCounts[getDMRoom(username, dmUser)]}
+                </span>
+              )}
+              <span
+                style={{ cursor: "pointer", opacity: 0.6 }}
+                onClick={() => { setDmUser(null); setRoom("general"); }}
+              >x</span>
+            </div>
+          )}
+
           <p style={{ ...s.sectionLabel, marginTop: 28 }}>Online — {onlineUsers.length}</p>
           <div style={s.userList}>
-            {onlineUsers.map((u, i) => (
-              <div key={i} style={s.userRow}>
+            {onlineUsers.filter(u => u !== username).map((u, i) => (
+              <div key={i} style={{...s.userRow, cursor: "pointer" }} onClick={() => openDM(u)} title={`DM ${u}`}>
                 <Avatar name={u} size={26} />
                 <span style={s.userName}>{u}</span>
                 <span style={s.onlineDot} />
@@ -248,14 +308,27 @@ export default function App() {
         {/* Header */}
         <header style={s.header}>
           <div style={s.headerLeft}>
-            <span style={s.headerIcon}>{currentRoom?.icon}</span>
+            <span style={s.headerIcon}>
+              {dmUser ? <Avatar name={dmUser} size={28} /> : currentRoom?.icon}
+            </span>
             <div>
-              <p style={s.headerRoom}>{currentRoom?.label}</p>
-              <div style={s.headerSub}>
-                {typingUser ? <><TypingDots /><span style={{ marginLeft: 6, color: "var(--accent)", fontSize: 12 }}>{typingUser} is typing</span></> : `${onlineUsers.length} online`}
-              </div>
+              <p style={s.headerRoom}>{dmUser ? dmUser : currentRoom?.label}</p>
+              <p style={s.headerSub}>
+                {typingUser 
+                  ? <><TypingDots /><span style={{ marginLeft: 6, color: "var(--accent)", fontSize: 12 }}>{typingUser} is typing</span></> 
+                  : dmUser ? "Private message" :  `${onlineUsers.length} online`
+                }
+              </p>
             </div>
           </div>
+          {dmUser && (
+            <button
+              style={{ ...s.logoutBtn, width: "auto", padding: "6px 12px" }}
+              onClick={() => { setDmUser(null); setRoom("general"); }}
+            >
+              x Close DM
+            </button>
+          )}
           <button
             style={s.notifBtn}
             onClick={() => Notification.requestPermission()}
