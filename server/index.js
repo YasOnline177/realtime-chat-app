@@ -16,7 +16,9 @@ const userSockets = {};
 const app = express();
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
+}));
 
 mongoose
   .connect(process.env.MONGO_URI)
@@ -27,7 +29,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
     methods: ["GET", "POST"],
   },
 });

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import axios from "axios";
 
+const SERVER_URL = import.meta.env.VITE_SERVER_URL;
+
 function Auth({ setUsername }) {
     const [isLogin, setIsLogin] = useState(true);
     const [formData, setFormData] = useState({
@@ -27,7 +29,7 @@ function Auth({ setUsername }) {
         try {
             const endpoint = isLogin ? "login" : "register";
             const response = await axios.post(
-                `http://localhost:5001/${endpoint}`,
+                `${SERVER_URL}/${endpoint}`,
                 formData
             );
             if (isLogin) {

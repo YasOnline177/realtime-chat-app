@@ -3,7 +3,8 @@ import io from "socket.io-client";
 import axios from "axios";
 import Auth from "./components/Auth";
 
-const socket = io("http://localhost:5001");
+const SERVER_URL = import.meta.env.VITE_SERVER_URL;
+const socket = io(SERVER_URL);
 
 const ROOMS = [
   { id: "general", label: "General", icon: "◈" },
@@ -169,7 +170,7 @@ export default function App() {
   const fetchMessages = useCallback(async () => {
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get("http://localhost:5001/messages", {
+      const res = await axios.get(`${SERVER_URL}/messages`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { room },
       });
