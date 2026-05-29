@@ -96,6 +96,7 @@ export default function App() {
   const [activeDM] = useState(() => new Set()); // Track joined DM rooms
   const [dmUser, setDmUser] = useState(null);
   const [readReceipts, setReadReceipts] = useState({});
+  const [dmToast, setDmToast] = useState(null);
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
@@ -132,6 +133,11 @@ export default function App() {
           ...prev,
           [data.room]: (prev[data.room] || 0) + 1
         }));
+        // Show toast for DM messages
+        if (data.room.startsWith("dm_") && data.user !== usernameRef.current) {
+          setDmToast({ from: data.user, dmRoom: data.room });
+          setTimeout(() => setDmToast(null), 4000);
+        }
       }
 
       if (data.user !== usernameRef.current && Notification.permission === "granted" && document.hidden) {
@@ -154,15 +160,17 @@ export default function App() {
     });
     socket.on("incoming_dm", ({ from, dmRoom }) => {
       // Show notification
-      if (Notification.permission === "granted") {
+      if (Notification.permission === "granted" && document.hidden) {
         new Notification(`💬 ${from}`, {body: "Sent you a private message" });
       }
-      // Auto-join DM room so messages come through
-      socket.join && socket.emit("join_room", dmRoom);
+      socket.emit("join_room", dmRoom);
       setUnreadCounts(prev => ({
         ...prev,
         [dmRoom]: (prev[dmRoom] || 0) + 1,
       }));
+      // Show in-app toast
+      setDmToast({ from, dmRoom });
+      setTimeout(() => setDmToast(null), 4000);
     });
     socket.on("message_read", ({ username: reader, messageId }) => {
       setReadReceipts(prev => {
@@ -256,6 +264,32 @@ export default function App() {
   return (
     <div style={s.shell}>
 
+      {/* DM Toast */}
+      {dmToast && (
+        <div
+          onClick={() => {
+            setDmUser(dmToast.from);
+            setRoom(dmToast.dmRoom);
+            setDmToast(null);
+          }}
+          style={s.dmToast}
+        >
+          <Avatar name={dmToast.from} size={28} />
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+              💬 {dmToast.from}
+            </p>
+            <p style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+              Send you a private message
+            </p>
+          </div>
+          <span
+            style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}
+            onClick={(e) => { e.stopPropagation(); setDmToast(null); }}
+          >x</span>
+        </div>
+      )}
+
       {/* ── SIDEBAR ── */}
       <aside style={s.sidebar}>
         <div style={s.sideTop}>
@@ -268,7 +302,7 @@ export default function App() {
           {ROOMS.map(r => (
             <button
               key={r.id}
-              onClick={() => setRoom(r.id)}
+              onClick={() => { setRoom(r.id); setDmUser(null); }}
               style={{
                 ...s.roomBtn,
                 ...(r.id === room ? s.roomBtnActive : {}),
@@ -283,14 +317,18 @@ export default function App() {
           ))}
 
           {dmUser && (
-            <div style={{
-              background: "var(--accent-dim)",
-              border: "1px solid var(--accent-glow)",
-              borderRadius: 8, padding: "8px 10px",
-              marginBottom: 8, fontSize: 12, 
-              color: "var(--accent)",
-              display: "flex", alignItems: "center", gap: 6
-            }}>
+            <div
+              onClick={() => setRoom(getDMRoom(username, dmUser))}
+              style={{
+                background: room.startsWith("dm_") ? "var(--accent-dim)" : "none",
+                border: `1px solid ${room.startsWith("dm_") ? "var(--accent-glow)" : "var(--border)"}`,
+                borderRadius: 8, padding: "8px 10px",
+                marginBottom: 8, fontSize: 12, 
+                color: room.startsWith("dm_") ? "var(--accent)" : "var(--text-secondary)",
+                display: "flex", alignItems: "center", gap: 6,
+                cursor: "pointer", transition: "all 0.15s"
+              }}
+            >
               <Avatar name={dmUser} size={20} />
               <span style={{ flex: 1 }}>DM: {dmUser}</span>
               {unreadCounts[getDMRoom(username, dmUser)] > 0 && (
@@ -300,7 +338,11 @@ export default function App() {
               )}
               <span
                 style={{ cursor: "pointer", opacity: 0.6 }}
-                onClick={() => { setDmUser(null); setRoom("general"); }}
+                onClick={(e) => {
+                  e.stopPropagation();  
+                  setDmUser(null);
+                  setRoom("general");
+                }}
               >x</span>
             </div>
           )}
@@ -670,6 +712,20 @@ const s = {
     fontSize: 10,
     color: "var(--accent)",
     opacity: 0.7
+  },
+  dmToast: {
+    position: "fixed",
+    bottom: 24, right: 24,
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--accent-glow)",
+    borderRadius: 14, 
+    padding: "12px 16px",
+    display: "flex", alignItems: "center", gap: 10,
+    cursor: "pointer", 
+    zIndex: 200,
+    boxShadow: "0 8px 32px #00000066",
+    minWidth: 260,
+    animation: "slideUp 0.3s ease"
   }
 };
 
