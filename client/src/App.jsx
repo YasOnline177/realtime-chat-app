@@ -360,7 +360,7 @@ export default function App() {
                   {!isSelf && <span style={s.msgAuthor}>{msg.user}</span>}
 
                   {/* Reaction bar */}
-                  {hoverMsg === i && (
+                  {hoverMsg === i && !isSelf && (
                     <div style={{
                       ...s.reactionBar,
                       right: isSelf ? "auto" : undefined,
