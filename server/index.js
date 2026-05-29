@@ -76,22 +76,18 @@ io.on("connection", (socket) => {
     try {
       const newMessage = new Message(data);
       await newMessage.save();
-      if (data.room.startsWith("dm_")) {
-        const users = data.room.replace("dm_", "").split("_");
-
-        users.forEach((username) => {
-          const socketId = userSockets[username];
-
-          if (socketId) {
-            io.to(socketId).emit("receive_message", newMessage);
-          }
-        });
-      } else {
-        io.to(data.room).emit("receive_message", newMessage);
-      }
+      // Send back with _id so client can track receipts
+      io.to(data.room).emit("receive_message", {
+        ...data,
+        _id: newMessage._id.toString(),
+      });
     } catch (error) {
       console.log(error);
     }
+  });
+
+  socket.on("mark_read", ({ room, username, messageId }) => {
+    socket.to(room).emit("message_read", { username, messageId });
   });
 
   socket.on("toggle_reaction", async ({ messageId, emoji, username }) => {

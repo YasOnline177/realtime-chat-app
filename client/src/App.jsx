@@ -95,6 +95,7 @@ export default function App() {
   const [hoverMsg, setHoverMsg] = useState(null);
   const [activeDM] = useState(() => new Set()); // Track joined DM rooms
   const [dmUser, setDmUser] = useState(null);
+  const [readReceipts, setReadReceipts] = useState({});
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
@@ -118,7 +119,13 @@ export default function App() {
     socket.on("receive_message", (data) => {
       if (data.room === roomRef.current) {
         // Only add to chat if it's the current room
-        setChat(prev => [...prev, data]);
+        setChat(prev => {
+          const updated = [...prev, data];
+          if (data.user !== usernameRef.current) {
+            markLastMessageRead(updated);
+          }
+          return updated;
+        });
       } else {
         // Increment unread for other rooms
         setUnreadCounts(prev => ({
@@ -157,6 +164,13 @@ export default function App() {
         [dmRoom]: (prev[dmRoom] || 0) + 1,
       }));
     });
+    socket.on("message_read", ({ username: reader, messageId }) => {
+      setReadReceipts(prev => {
+        const current = prev[messageId] || [];
+        if (current.includes(reader)) return prev;
+        return { ...prev, [messageId]: [...current, reader] };
+      });
+    });
 
     return () => {
       socket.off("receive_message");
@@ -164,6 +178,7 @@ export default function App() {
       socket.off("online_users");
       socket.off("connect", handleReconnect);
       socket.off("incoming_dm");
+      socket.off("message_read");
     };
   }, [username]);
 
@@ -175,6 +190,7 @@ export default function App() {
         params: { room },
       });
       setChat(res.data);
+      markLastMessageRead(res.data);
     } catch (e) { console.log(e); }
   }, [room]);
 
@@ -201,6 +217,18 @@ export default function App() {
     setMessage("");
     inputRef.current?.focus();
   };
+
+  const markLastMessageRead = useCallback((messages) => {
+    if (!messages.length) return;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg._id) return;
+    if (lastMsg.user === username) return;
+    socket.emit("mark_read", {
+      room: roomRef.current,
+      username,
+      messageId: lastMsg._id,
+    });
+  }, [username]);
 
   const toggleReaction = (messageId, emoji) => {
     socket.emit("toggle_reaction", {
@@ -404,6 +432,16 @@ export default function App() {
                   )}
 
                   <span style={s.msgTime}>{msg.time}</span>
+
+                  {/* Read receipts */}
+                  {isSelf && msg._id && readReceipts[msg._id]?.length > 0 && (
+                    <div style={s.seenRow}>
+                      {readReceipts[msg._id].map((reader, idx) => (
+                        <Avatar key={idx} name={reader} size={14} />
+                      ))}
+                      <span style={s.seenText}>Seen</span>
+                    </div>
+                  )}
                 </div>
                 {isSelf && <Avatar name={msg.user} size={30} />}
               </div>
@@ -623,6 +661,15 @@ const s = {
     fontSize: 12, cursor: "pointer",
     display: "flex", alignItems: "center", gap: 3,
     transition: "border-color 0.15s"
+  },
+  seenRow: {
+    display: "flex", alignItems: "center", gap: 3,
+    marginTop: 2
+  },
+  seenText: {
+    fontSize: 10,
+    color: "var(--accent)",
+    opacity: 0.7
   }
 };
 
