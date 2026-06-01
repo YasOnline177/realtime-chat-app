@@ -69,6 +69,24 @@ app.get("/messages", authenticateToken, async (req, res) => {
   }
 });
 
+app.get("/messages/search", authenticateToken, async (req, res) => {
+  try {
+    const { room, q } = req.query;
+    if (!q || !room) return res.json([]);
+
+    const results = await Message.find({
+      room,
+      message: { $regex: q, $options: "i" },  // case-insensitive search
+    })
+    .sort({ createdAt: 1 })
+    .limit(30);
+
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 io.on("connection", (socket) => {
   console.log(`User connected: ${socket.id}`);
 

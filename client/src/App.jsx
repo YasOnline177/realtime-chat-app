@@ -97,10 +97,16 @@ export default function App() {
   const [dmUser, setDmUser] = useState(null);
   const [readReceipts, setReadReceipts] = useState({});
   const [dmToast, setDmToast] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [highlightedId, setHighlightedId] = useState(null);
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
   const roomRef = useRef(room);
+  const msgRefs = useRef({});
 
   useEffect(() => { usernameRef.current = username; }, [username]);
   useEffect(() => { roomRef.current = room; }, [room]);
@@ -202,17 +208,41 @@ export default function App() {
     } catch (e) { console.log(e); }
   }, [room]);
 
+  const searchMessages = useCallback(async (q) => {
+    if (!q.trim()) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${SERVER_URL}/messages/search`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { room, q },
+      });
+      setSearchResults(res.data);
+    } catch (e) { console.log(e); }
+    finally { setSearchLoading(false); }
+  }, [room]);
+
   useEffect(() => {
     if (!username) return;
     fetchMessages();
     // Clear unread for the room just entered
     setUnreadCounts(prev => ({ ...prev, [room]: 0 }));
     setReactions({});
+    setSearchQuery("");
+    setSearchResults([]);
+    setShowSearch(false);
   }, [room, fetchMessages, username]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchMessages(searchQuery);
+    }, 400);  // wait 400ms after user stops typing
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchMessages]);
 
   const sendMessage = () => {
     if (!message.trim()) return;
@@ -224,6 +254,20 @@ export default function App() {
     });
     setMessage("");
     inputRef.current?.focus();
+  };
+
+  const jumpToMessage = (msgId) => {
+    // Check if message is already in chat
+    const el = msgRefs.current[msgId];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedId(msgId);
+      setTimeout(() => setHighlightedId(null), 2000);
+      setShowSearch(false);
+      return;
+    }
+    // if not in chat, fetch and inject
+    setShowSearch(false);
   };
 
   const markLastMessageRead = useCallback((messages) => {
@@ -400,13 +444,29 @@ export default function App() {
               x Close DM
             </button>
           )}
-          <button
-            style={s.notifBtn}
-            onClick={() => Notification.requestPermission()}
-            title="Enable notifications"
-          >
-            🔔
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              style={{
+                ...s.notifBtn, 
+                ...(showSearch ? { opacity: 1, color: "var(--accent)" } : {}),
+              }}
+              onClick={() => {
+                setShowSearch(prev => !prev);
+                setSearchQuery("");
+                setSearchResults([]);
+              }}
+              title="Search messages"
+            >
+              🔍
+            </button>
+            <button
+              style={s.notifBtn}
+              onClick={() => Notification.requestPermission()}
+              title="Enable notification"
+            >
+              🔔
+            </button>
+          </div>
         </header>
 
         {/* Messages */}
@@ -423,7 +483,7 @@ export default function App() {
             const msgReactions = msg.reactions || {};
             
             return (
-              <div key={i} style={{ ...s.msgRow, justifyContent: isSelf ? "flex-end" : "flex-start" }} onMouseEnter={() => setHoverMsg(i)} onMouseLeave={() => setHoverMsg(null)} >
+              <div key={i} ref={el => msgRefs.current[msg._id] = el} style={{ ...s.msgRow, justifyContent: isSelf ? "flex-end" : "flex-start" }} onMouseEnter={() => setHoverMsg(i)} onMouseLeave={() => setHoverMsg(null)} >
                 {!isSelf && <Avatar name={msg.user} size={30} />}
 
                 <div style={{ maxWidth: "65%", display: "flex", flexDirection: "column", gap: 3, alignItems: isSelf ? "flex-end" : "flex-start", position: "relative" }}>
@@ -491,6 +551,65 @@ export default function App() {
           })}
           <div ref={chatEndRef} />
         </div>
+
+        {/* Search Panel */}
+        {showSearch && (
+          <div style={s.searchPanel}>
+            <div style={s.searchInputWrap}>
+              <span style={{ color: "var(--text-muted)", fontSize: 14 }}>🔍</span>
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search messages..."
+                style={s.searchInput}
+              />
+              {searchQuery && (
+                <span
+                  style={{ cursor: "pointer", color: "var(--text-muted)", fontSize: 12 }}
+                  onClick={() => { setSearchQuery(""); setSearchResults([]); }}
+                >✕</span>
+              )}
+            </div>
+
+            <div style={s.searchResults}>
+              {searchLoading && (
+                <p style={s.searchMeta}>Searching...</p>
+              )}
+              {!searchLoading && searchQuery && searchResults.length === 0 && (
+                <p style={s.searchMeta}>No result for "{searchQuery}"</p>
+              )}
+              {!searchLoading && searchResults.map((msg, i) => {
+                // Highligh matched text
+                const parts = msg.message.split(new RegExp(`(${searchQuery})`, "gi"));
+                return (
+                  <div
+                    key={i}
+                    style={s.searchResultItem}
+                    onClick={() => jumpToMessage(msg._id)}
+                  >
+                    <Avatar name={msg.user} size={24} />
+                    <div style={{ flex: 1, minWidth: 0}}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2}}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)" }}>
+                          {msg.user}
+                        </span>
+                        <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{msg.time}</span>
+                      </div>
+                      <p style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {parts.map((part, j) => 
+                          part.toLowerCase() === searchQuery.toLowerCase()
+                            ? <mark key={j} style={{ background: "var(--accent)", color: "#0d0f14", borderRadius: 3, padding: "0 2px" }}>{part}</mark>
+                            : part
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Input */}
         {showEmoji && (
@@ -726,7 +845,44 @@ const s = {
     boxShadow: "0 8px 32px #00000066",
     minWidth: 260,
     animation: "slideUp 0.3s ease"
-  }
+  },
+  searchPanel: {
+    borderTop: "1px solid var(--border)",
+    borderBottom: "1px solid var(--border)",
+    background: "var(--bg-surface)",
+    flexShrink: 0,
+    maxHeight: 320,
+    display: "flex", 
+    flexDirection: "column",
+  }, 
+  searchInputWrap: {
+    display: "flex", alignItems: "center", gap: 8,
+    padding: "12px 20px",
+    borderBottom: "1px solid var(--border)",
+  },
+  searchInput: {
+    flex: 1, background: "none", border: "none",
+    color: "var(--text-primary)", fontSize: 14,
+    fontFamily: "'Sora', sans-serif", outline: "none",
+  },
+  searchResults: {
+    overflowY: "auto", flex: 1,
+  },
+  searchMeta: {
+    fontSize: 12, color: "var(--text-muted)",
+    padding: "16px 20px", textAlign: "center",
+  },
+  searchResultItem: {
+    display: "flex", gap: 10, alignItems: "center",
+    padding: "10px 20px", cursor: "pointer",
+    borderBottom: "1px solid var(--border)",
+    transition: "background 0.15s",
+  },
+  msgHighlight: {
+    background: "var(--accent-dim)",
+    borderRadius: 12,
+    transition: "background 0.5s",
+  },
 };
 
 const emojiStyles = {
