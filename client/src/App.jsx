@@ -13,12 +13,12 @@ const ROOMS = [
 ];
 
 const EMOJIS = [
-  "😀","😂","😍","🥹","😎","😭","🤯","🥳","😴","🤔",
-  "👍","👎","❤️","🔥","💯","🎉","✅","🚀","💀","👀",
-  "😤","🫡","🤝","🙏","👏","💪","🫶","😈","🤡","💅",
+  "😀", "😂", "😍", "🥹", "😎", "😭", "🤯", "🥳", "😴", "🤔",
+  "👍", "👎", "❤️", "🔥", "💯", "🎉", "✅", "🚀", "💀", "👀",
+  "😤", "🫡", "🤝", "🙏", "👏", "💪", "🫶", "😈", "🤡", "💅",
 ];
 
-const QUICK_REACTIONS = ["👍","❤️","😂","🔥","😮","👏"];
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "🔥", "😮", "👏"];
 
 function getInitials(name) {
   return name?.slice(0, 2).toUpperCase() || "??";
@@ -156,8 +156,8 @@ export default function App() {
     });
     socket.on("online_users", (users) => setOnlineUsers(users));
     socket.on("reaction_updated", ({ messageId, reactions }) => {
-      setChat(prev => 
-        prev.map(msg => 
+      setChat(prev =>
+        prev.map(msg =>
           msg._id === messageId
             ? { ...msg, reactions }
             : msg
@@ -167,7 +167,7 @@ export default function App() {
     socket.on("incoming_dm", ({ from, dmRoom }) => {
       // Show notification
       if (Notification.permission === "granted" && document.hidden) {
-        new Notification(`💬 ${from}`, {body: "Sent you a private message" });
+        new Notification(`💬 ${from}`, { body: "Sent you a private message" });
       }
       socket.emit("join_room", dmRoom);
       setUnreadCounts(prev => ({
@@ -196,6 +196,18 @@ export default function App() {
     };
   }, [username]);
 
+  const markLastMessageRead = useCallback((messages) => {
+    if (!messages.length) return;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg._id) return;
+    if (lastMsg.user === username) return;
+    socket.emit("mark_read", {
+      room: roomRef.current,
+      username,
+      messageId: lastMsg._id,
+    });
+  }, [username]);
+
   const fetchMessages = useCallback(async () => {
     try {
       const token = localStorage.getItem("token");
@@ -205,8 +217,15 @@ export default function App() {
       });
       setChat(res.data);
       markLastMessageRead(res.data);
-    } catch (e) { console.log(e); }
-  }, [room]);
+    } catch (e) {
+      // Token expited or invelid, force re-login
+      if (e.response?.status === 401 || e.response?.status === 403) {
+        localStorage.clear();
+        setUsername("");
+      }
+      console.log(e);
+    }
+  }, [room, markLastMessageRead]);
 
   const searchMessages = useCallback(async (q) => {
     if (!q.trim()) { setSearchResults([]); return; }
@@ -244,6 +263,26 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [searchQuery, searchMessages]);
 
+  // Check token expiry on mount
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      // JWT payload is base64 encoded in the middle section
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      const isExpired = payload.exp * 1000 < Date.now();
+      if (isExpired) {
+        localStorage.clear();
+        setUsername("");
+      }
+    } catch (e) {
+      // Malformed token — clear it
+      localStorage.clear();
+      setUsername("");
+    }
+  }, []);
+
   const sendMessage = () => {
     if (!message.trim()) return;
     socket.emit("send_message", {
@@ -269,18 +308,6 @@ export default function App() {
     // if not in chat, fetch and inject
     setShowSearch(false);
   };
-
-  const markLastMessageRead = useCallback((messages) => {
-    if (!messages.length) return;
-    const lastMsg = messages[messages.length - 1];
-    if (!lastMsg._id) return;
-    if (lastMsg.user === username) return;
-    socket.emit("mark_read", {
-      room: roomRef.current,
-      username,
-      messageId: lastMsg._id,
-    });
-  }, [username]);
 
   const toggleReaction = (messageId, emoji) => {
     socket.emit("toggle_reaction", {
@@ -367,7 +394,7 @@ export default function App() {
                 background: room.startsWith("dm_") ? "var(--accent-dim)" : "none",
                 border: `1px solid ${room.startsWith("dm_") ? "var(--accent-glow)" : "var(--border)"}`,
                 borderRadius: 8, padding: "8px 10px",
-                marginBottom: 8, fontSize: 12, 
+                marginBottom: 8, fontSize: 12,
                 color: room.startsWith("dm_") ? "var(--accent)" : "var(--text-secondary)",
                 display: "flex", alignItems: "center", gap: 6,
                 cursor: "pointer", transition: "all 0.15s"
@@ -383,7 +410,7 @@ export default function App() {
               <span
                 style={{ cursor: "pointer", opacity: 0.6 }}
                 onClick={(e) => {
-                  e.stopPropagation();  
+                  e.stopPropagation();
                   setDmUser(null);
                   setRoom("general");
                 }}
@@ -394,7 +421,7 @@ export default function App() {
           <p style={{ ...s.sectionLabel, marginTop: 28 }}>Online — {onlineUsers.length}</p>
           <div style={s.userList}>
             {onlineUsers.filter(u => u !== username).map((u, i) => (
-              <div key={i} style={{...s.userRow, cursor: "pointer" }} onClick={() => openDM(u)} title={`DM ${u}`}>
+              <div key={i} style={{ ...s.userRow, cursor: "pointer" }} onClick={() => openDM(u)} title={`DM ${u}`}>
                 <Avatar name={u} size={26} />
                 <span style={s.userName}>{u}</span>
                 <span style={s.onlineDot} />
@@ -429,9 +456,9 @@ export default function App() {
             <div>
               <p style={s.headerRoom}>{dmUser ? dmUser : currentRoom?.label}</p>
               <p style={s.headerSub}>
-                {typingUser 
-                  ? <><TypingDots /><span style={{ marginLeft: 6, color: "var(--accent)", fontSize: 12 }}>{typingUser} is typing</span></> 
-                  : dmUser ? "Private message" :  `${onlineUsers.length} online`
+                {typingUser
+                  ? <><TypingDots /><span style={{ marginLeft: 6, color: "var(--accent)", fontSize: 12 }}>{typingUser} is typing</span></>
+                  : dmUser ? "Private message" : `${onlineUsers.length} online`
                 }
               </p>
             </div>
@@ -447,7 +474,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               style={{
-                ...s.notifBtn, 
+                ...s.notifBtn,
                 ...(showSearch ? { opacity: 1, color: "var(--accent)" } : {}),
               }}
               onClick={() => {
@@ -481,7 +508,7 @@ export default function App() {
           {chat.map((msg, i) => {
             const isSelf = msg.user === username;
             const msgReactions = msg.reactions || {};
-            
+
             return (
               <div key={i} ref={el => msgRefs.current[msg._id] = el} style={{ ...s.msgRow, justifyContent: isSelf ? "flex-end" : "flex-start" }} onMouseEnter={() => setHoverMsg(i)} onMouseLeave={() => setHoverMsg(null)} >
                 {!isSelf && <Avatar name={msg.user} size={30} />}
@@ -589,15 +616,15 @@ export default function App() {
                     onClick={() => jumpToMessage(msg._id)}
                   >
                     <Avatar name={msg.user} size={24} />
-                    <div style={{ flex: 1, minWidth: 0}}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2}}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
                         <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)" }}>
                           {msg.user}
                         </span>
                         <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{msg.time}</span>
                       </div>
                       <p style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {parts.map((part, j) => 
+                        {parts.map((part, j) =>
                           part.toLowerCase() === searchQuery.toLowerCase()
                             ? <mark key={j} style={{ background: "var(--accent)", color: "#0d0f14", borderRadius: 3, padding: "0 2px" }}>{part}</mark>
                             : part
@@ -793,7 +820,7 @@ const s = {
     fontSize: 10,
     fontWeight: 600,
     borderRadius: 20,
-    padding: "1px 6px", 
+    padding: "1px 6px",
     minWidth: 18,
     textAlign: "center"
   },
@@ -807,7 +834,7 @@ const s = {
   },
   reactionPickBtn: {
     background: "none", border: "none",
-    fontSize: 16, cursor: "pointer", 
+    fontSize: 16, cursor: "pointer",
     padding: "2px 4px", borderRadius: 6,
     transition: "transform 0.1s",
     lineHeight: 1
@@ -837,10 +864,10 @@ const s = {
     bottom: 24, right: 24,
     background: "var(--bg-elevated)",
     border: "1px solid var(--accent-glow)",
-    borderRadius: 14, 
+    borderRadius: 14,
     padding: "12px 16px",
     display: "flex", alignItems: "center", gap: 10,
-    cursor: "pointer", 
+    cursor: "pointer",
     zIndex: 200,
     boxShadow: "0 8px 32px #00000066",
     minWidth: 260,
@@ -852,9 +879,9 @@ const s = {
     background: "var(--bg-surface)",
     flexShrink: 0,
     maxHeight: 320,
-    display: "flex", 
+    display: "flex",
     flexDirection: "column",
-  }, 
+  },
   searchInputWrap: {
     display: "flex", alignItems: "center", gap: 8,
     padding: "12px 20px",
@@ -894,7 +921,7 @@ const emojiStyles = {
     bottom: 80, left: 240,
     background: "var(--bg-elevated)",
     border: "1px solid var(--border)",
-    borderRadius: 14, 
+    borderRadius: 14,
     padding: 12,
     display: "grid",
     gridTemplateColumns: "repeat(10, 1fr)",
