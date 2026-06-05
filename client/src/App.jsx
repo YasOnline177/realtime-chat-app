@@ -4,6 +4,8 @@ import axios from "axios";
 import Auth from "./components/Auth";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL;
+const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD;
+const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_PRESET;
 const socket = io(SERVER_URL);
 
 const ROOMS = [
@@ -78,6 +80,38 @@ function EmojiPicker({ onSelect, onClose }) {
   );
 }
 
+function Lightbox({ src, onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 300,
+        background: "#000000cc",
+        display: "flex", alignItems: "center", justifyContent: "center"
+      }}
+    >
+      <img 
+        src={src}
+        alt="full size"
+        style={{
+          maxWidth: "90vw", maxHeight: "90vh",
+          borderRadius: 12,
+          boxShadow: "0 20px 60px #000"
+        }}
+        onClick={e => e.stopPropagation()}
+      />
+      <button
+        onClick={onClose}
+        style={{
+          position: "absolute", top: 20, right: 24,
+          background: "none", border: "none",
+          color: "#fff", fontSize: 28, cursor: "pointer"
+        }}
+      >x</button>
+    </div>
+  );
+}
+
 function getDMRoom(userA, userB) {
   return "dm_" + [userA, userB].sort().join("_");
 }
@@ -102,11 +136,15 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [highlightedId, setHighlightedId] = useState(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState(null);
+
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
   const inputRef = useRef(null);
   const roomRef = useRef(room);
   const msgRefs = useRef({});
+  const fileInputRef = useRef(null);
 
   useEffect(() => { usernameRef.current = username; }, [username]);
   useEffect(() => { roomRef.current = room; }, [room]);
@@ -293,6 +331,47 @@ export default function App() {
     });
     setMessage("");
     inputRef.current?.focus();
+  };
+
+  const uploadImage = async (file) => {
+    // Validate file
+    if (!file.type.startsWith("image/")) {
+      alert("Only image files are supported");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Image must be under 5MB");
+      return;
+    }
+
+    setImageUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", UPLOAD_PRESET);
+
+      const res = await axios.post(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        formData
+      );
+
+      const imageUrl = res.data.secure_url;
+
+      // Send as a message with imageUrl
+      socket.emit("send_message", {
+        user: username,
+        message: "",
+        imageUrl,
+        messageType: "image",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        room,
+      });
+    } catch (e) {
+      console.log(e);
+      alert("Image upload failed. Try again");
+    } finally {
+      setImageUploading(false);
+    }
   };
 
   const jumpToMessage = (msgId) => {
@@ -537,8 +616,23 @@ export default function App() {
                   )}
 
                   {/* Bubble */}
-                  <div style={{ ...s.bubble, ...(isSelf ? s.bubbleSelf : s.bubbleOther) }}>
-                    {msg.message}
+                  <div style={{ ...s.bubble, ...(isSelf ? s.bubbleSelf : s.bubbleOther),
+                    ...(msg.messageType === "image" ? { padding: 4, background: "none", border: "none" } : {})
+                  }}>
+                    {msg.messageType === "image" ? (
+                      <img 
+                        src={msg.imageUrl}
+                        alt="shared image"
+                        style={{
+                          maxWidth: 240, maxHeight: 200,
+                          borderRadius: 10, display: "block",
+                          cursor: "pointer", objectFit: "cover"
+                        }}
+                        onClick={() => setLightboxImage(msg.imageUrl)}
+                      />
+                    ) : (
+                      msg.message
+                    )}
                   </div>
 
                   {/* Reaction chip below bubble */}
@@ -638,7 +732,19 @@ export default function App() {
           </div>
         )}
 
-        {/* Input */}
+        {/* Hidden file input */}
+        <input 
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files[0];
+            if (file) uploadImage(file);
+            e.target.value = "";  // reset so the same file can be re-uploaded
+          }}
+        />
+
         {showEmoji && (
           <EmojiPicker
             onSelect={(emoji) => {
@@ -663,6 +769,22 @@ export default function App() {
           >
             😊
           </button>
+
+          {/* Image upload button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={imageUploading}
+            style={{
+              ...s.sendBtn,
+              background: "var(--bg-elevated)",
+              color: imageUploading ? "var(--text-muted)" : "var(--text-primary)",
+              fontSize: 18, border: "1px solid var(--border)"
+            }}
+            title="Send image"
+          >
+            {imageUploading ? "⏳" : "🖼️"}
+          </button>
+
           <input
             ref={inputRef}
             value={message}
@@ -680,6 +802,11 @@ export default function App() {
         </div>
 
       </main>
+
+      {/* Lightbox */}
+      {lightboxImage && (
+        <Lightbox src={lightboxImage} onClose={() => setLightboxImage(null)} />
+      )}
     </div>
   );
 }

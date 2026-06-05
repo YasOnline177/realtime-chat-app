@@ -7,7 +7,7 @@ const messageSchema = new mongoose.Schema({
     },
     message: {
         type: String,
-        required: true
+        default: ""
     },
     time: {
         type: String
@@ -15,6 +15,14 @@ const messageSchema = new mongoose.Schema({
     room: {
         type: String,
         required: true
+    },
+    imageUrl: {
+        type: String
+    },
+    messageType: {
+        type: String,
+        enum: ["text", "image"],
+        default: "text"
     },
     reactions: {
         type: Map,
