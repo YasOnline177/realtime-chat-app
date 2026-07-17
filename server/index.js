@@ -87,6 +87,32 @@ app.get("/messages/search", authenticateToken, async (req, res) => {
   }
 });
 
+// GET profile for any user
+app.get("/profile/:username", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findOne({ username: req.params.username }).select("-password");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UPDATE own profile
+app.put("/profile", authenticateToken, async (req, res) => {
+  try {
+    const { bio, status, avatarUrl } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { bio, status, avatarUrl },
+      { new: true }
+    ).select("-password");
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 io.on("connection", (socket) => {
   console.log(`User connected: ${socket.id}`);
 
@@ -171,6 +197,10 @@ io.on("connection", (socket) => {
       }
     }
     console.log(`${from} joined DM room: ${dmRoom}`);
+  });
+
+  socket.on("profile_updated", ({ username, profile }) => {
+    socket.broadcast.emit("user_profile_updated", { username, profile });
   });
 
   socket.on("disconnect", () => {

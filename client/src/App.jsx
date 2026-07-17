@@ -26,9 +26,26 @@ function getInitials(name) {
   return name?.slice(0, 2).toUpperCase() || "??";
 }
 
-function Avatar({ name, size = 32 }) {
+function Avatar({ name, size = 32, avatarUrl = null }) {
   const colors = ["#4fffb0", "#ff9f4f", "#4fb4ff", "#d44fff", "#fff44f"];
   const color = colors[name?.charCodeAt(0) % colors.length] || "#4fffb0";
+
+  if (avatarUrl) {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: "50%",
+        overflow: "hidden", flexShrink: 0,
+        border: `1.5px solid ${color}55`,
+      }}>
+        <img
+          src={avatarUrl}
+          alt={name}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{
       width: size, height: size, borderRadius: "50%",
@@ -90,7 +107,7 @@ function Lightbox({ src, onClose }) {
         display: "flex", alignItems: "center", justifyContent: "center"
       }}
     >
-      <img 
+      <img
         src={src}
         alt="full size"
         style={{
@@ -138,6 +155,12 @@ export default function App() {
   const [highlightedId, setHighlightedId] = useState(null);
   const [imageUploading, setImageUploading] = useState(false);
   const [lightboxImage, setLightboxImage] = useState(null);
+  const [myProfile, setMyProfile] = useState({ bio: "", status: "", avatarUrl: "" });
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileCache, setProfileCache] = useState({});
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const fetchedProfiles = useRef(new Set());
 
   const chatEndRef = useRef(null);
   const usernameRef = useRef(username);
@@ -146,16 +169,49 @@ export default function App() {
   const msgRefs = useRef({});
   const fileInputRef = useRef(null);
 
+  const fetchMyProfile = useCallback(async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${SERVER_URL}/profile/${username}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMyProfile(res.data);
+      setProfileCache(prev => ({ ...prev, [username]: res.data }));
+    } catch (e) { console.log(e); }
+  }, [username]);
+
+  // Fetch any user's profile
+  const fetchProfile = useCallback(async (targetUsername) => {
+    if (fetchedProfiles.current.has(targetUsername)) return;
+    fetchedProfiles.current.add(targetUsername);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${SERVER_URL}/profile/${targetUsername}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setProfileCache(prev => ({ ...prev, [targetUsername]: res.data }));
+    } catch (e) {
+      fetchedProfiles.current.delete(targetUsername);
+      console.log(e);
+    }
+  }, []);
+
   useEffect(() => { usernameRef.current = username; }, [username]);
   useEffect(() => { roomRef.current = room; }, [room]);
 
   useEffect(() => {
+    onlineUsers.filter(u => u !== username).forEach(u => fetchProfile(u));
+  }, [onlineUsers, fetchProfile, username]);
+
+  useEffect(() => {
     if (!username) return;
     socket.emit("join_chat", username);
+    fetchMyProfile();
     ROOMS.forEach(r => socket.emit("join_room", r.id));
 
     const handleReconnect = () => {
       socket.emit("join_chat", username);
+      fetchMyProfile();
       ROOMS.forEach(r => socket.emit("join_room", r.id));
     };
 
@@ -224,6 +280,10 @@ export default function App() {
       });
     });
 
+    socket.on("user_profile_updated", ({ username: updatedUser, profile }) => {
+      setProfileCache(prev => ({ ...prev, [updatedUser]: profile }));
+    });
+
     return () => {
       socket.off("receive_message");
       socket.off("show_typing");
@@ -231,6 +291,7 @@ export default function App() {
       socket.off("connect", handleReconnect);
       socket.off("incoming_dm");
       socket.off("message_read");
+      socket.off("user_profile_updated");
     };
   }, [username]);
 
@@ -331,6 +392,40 @@ export default function App() {
     });
     setMessage("");
     inputRef.current?.focus();
+  };
+
+  // Save own profile
+  const saveProfile = async () => {
+    setProfileSaving(true);
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.put(`${SERVER_URL}/profile`, myProfile, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMyProfile(res.data);
+      setProfileCache(prev => ({ ...prev, [username]: res.data }));
+      socket.emit("profile_updated", { username, profile: res.data });
+      setShowProfile(false);
+    } catch (e) { console.log(e); }
+    finally { setProfileSaving(false); }
+  };
+
+  // Upload avatar to Cloudinary
+  const uploadAvatar = async (file) => {
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > 5 * 1024 * 1024) { alert("Image must be under 5MB."); return; }
+    setAvatarUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", UPLOAD_PRESET);
+      const res = await axios.post(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        formData
+      );
+      setMyProfile(prev => ({ ...prev, avatarUrl: res.data.secure_url }));
+    } catch (e) { console.log(e); }
+    finally { setAvatarUploading(false); }
   };
 
   const uploadImage = async (file) => {
@@ -500,9 +595,21 @@ export default function App() {
           <p style={{ ...s.sectionLabel, marginTop: 28 }}>Online — {onlineUsers.length}</p>
           <div style={s.userList}>
             {onlineUsers.filter(u => u !== username).map((u, i) => (
-              <div key={i} style={{ ...s.userRow, cursor: "pointer" }} onClick={() => openDM(u)} title={`DM ${u}`}>
-                <Avatar name={u} size={26} />
-                <span style={s.userName}>{u}</span>
+              <div
+                key={i}
+                style={{ ...s.userRow, cursor: "pointer" }}
+                onClick={() => openDM(u)}
+                title={`DM ${u}`}
+              >
+                <Avatar name={u} size={26} avatarUrl={profileCache[u]?.avatarUrl} />
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <span style={s.userName}>{u}</span>
+                  {profileCache[u]?.status && (
+                    <p style={{ fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {profileCache[u].status}
+                    </p>
+                  )}
+                </div>
                 <span style={s.onlineDot} />
               </div>
             ))}
@@ -510,9 +617,21 @@ export default function App() {
         </div>
 
         <div style={s.sideBottom}>
-          <div style={s.selfRow}>
-            <Avatar name={username} size={30} />
-            <span style={s.selfName}>{username}</span>
+          <div
+            style={{ ...s.selfRow, cursor: "pointer" }}
+            onClick={() => setShowProfile(true)}
+            title="Edit profile"
+          >
+            <Avatar name={username} size={30} avatarUrl={myProfile.avatarUrl} />
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <span style={s.selfName}>{username}</span>
+              {myProfile.status && (
+                <p style={{ fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {myProfile.status}
+                </p>
+              )}
+            </div>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>✎</span>
           </div>
           <button
             style={s.logoutBtn}
@@ -590,7 +709,11 @@ export default function App() {
 
             return (
               <div key={i} ref={el => msgRefs.current[msg._id] = el} style={{ ...s.msgRow, justifyContent: isSelf ? "flex-end" : "flex-start" }} onMouseEnter={() => setHoverMsg(i)} onMouseLeave={() => setHoverMsg(null)} >
-                {!isSelf && <Avatar name={msg.user} size={30} />}
+                {/* For recieved messages */}
+                {!isSelf && <Avatar name={msg.user} size={30} avatarUrl={profileCache[msg.user]?.avatarUrl} />}
+
+                {/* For sent messages */}
+                {isSelf && <Avatar name={msg.user} size={30} avatarUrl={myProfile.avatarUrl} />}
 
                 <div style={{ maxWidth: "65%", display: "flex", flexDirection: "column", gap: 3, alignItems: isSelf ? "flex-end" : "flex-start", position: "relative" }}>
                   {!isSelf && <span style={s.msgAuthor}>{msg.user}</span>}
@@ -616,11 +739,12 @@ export default function App() {
                   )}
 
                   {/* Bubble */}
-                  <div style={{ ...s.bubble, ...(isSelf ? s.bubbleSelf : s.bubbleOther),
+                  <div style={{
+                    ...s.bubble, ...(isSelf ? s.bubbleSelf : s.bubbleOther),
                     ...(msg.messageType === "image" ? { padding: 4, background: "none", border: "none" } : {})
                   }}>
                     {msg.messageType === "image" ? (
-                      <img 
+                      <img
                         src={msg.imageUrl}
                         alt="shared image"
                         style={{
@@ -660,7 +784,7 @@ export default function App() {
                   {isSelf && msg._id && readReceipts[msg._id]?.length > 0 && (
                     <div style={s.seenRow}>
                       {readReceipts[msg._id].map((reader, idx) => (
-                        <Avatar key={idx} name={reader} size={14} />
+                        <Avatar key={idx} name={reader} size={14} avatarUrl={reader === username ? myProfile.avatarUrl : profileCache[reader]?.avatarUrl} />
                       ))}
                       <span style={s.seenText}>Seen</span>
                     </div>
@@ -733,7 +857,7 @@ export default function App() {
         )}
 
         {/* Hidden file input */}
-        <input 
+        <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
@@ -806,6 +930,76 @@ export default function App() {
       {/* Lightbox */}
       {lightboxImage && (
         <Lightbox src={lightboxImage} onClose={() => setLightboxImage(null)} />
+      )}
+
+      {/* Profile Modal */}
+      {showProfile && (
+        <div style={s.profileOverlay} onClick={() => setShowProfile(false)}>
+          <div style={s.profileModal} onClick={e => e.stopPropagation()}>
+
+            <div style={s.profileHeader}>
+              <h2 style={{ fontSize: 16, fontWeight: 600 }}>Your Profile</h2>
+              <button style={s.modalClose} onClick={() => setShowProfile(false)}>✕</button>
+            </div>
+
+            {/* Avatar upload */}
+            <div style={s.profileAvatarWrap}>
+              <label style={{ cursor: "pointer", position: "relative", display: "inline-block" }}>
+                <Avatar name={username} size={80} avatarUrl={myProfile.avatarUrl} />
+                <div style={s.avatarOverlay}>
+                  {avatarUploading ? "⏳" : "📷"}
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={e => {
+                    const file = e.target.files[0];
+                    if (file) uploadAvatar(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
+                Click to change photo
+              </p>
+            </div>
+
+            <p style={s.profileUsername}>@{username}</p>
+
+            <div style={s.profileField}>
+              <label style={s.profileLabel}>Status</label>
+              <input
+                value={myProfile.status || ""}
+                onChange={e => setMyProfile(prev => ({ ...prev, status: e.target.value }))}
+                placeholder="What's on your mind?"
+                maxLength={60}
+                style={s.profileInput}
+              />
+            </div>
+
+            <div style={s.profileField}>
+              <label style={s.profileLabel}>Bio</label>
+              <textarea
+                value={myProfile.bio || ""}
+                onChange={e => setMyProfile(prev => ({ ...prev, bio: e.target.value }))}
+                placeholder="Tell people a little about yourself..."
+                maxLength={200}
+                rows={3}
+                style={{ ...s.profileInput, resize: "none", lineHeight: 1.5 }}
+              />
+            </div>
+
+            <button
+              onClick={saveProfile}
+              style={s.profileSaveBtn}
+              disabled={profileSaving}
+            >
+              {profileSaving ? "Saving..." : "Save Profile"}
+            </button>
+
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1036,6 +1230,60 @@ const s = {
     background: "var(--accent-dim)",
     borderRadius: 12,
     transition: "background 0.5s",
+  },
+  profileOverlay: {
+    position: "fixed", inset: 0, zIndex: 250,
+    background: "#00000099",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  profileModal: {
+    background: "var(--bg-surface)",
+    border: "1px solid var(--border)",
+    borderRadius: 20, padding: "28px 32px",
+    width: 360,
+    display: "flex", flexDirection: "column", gap: 16,
+    boxShadow: "0 20px 60px #000",
+  },
+  profileHeader: {
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+  },
+  modalClose: {
+    background: "none", border: "none",
+    color: "var(--text-muted)", fontSize: 18, cursor: "pointer",
+  },
+  profileAvatarWrap: {
+    display: "flex", flexDirection: "column",
+    alignItems: "center", gap: 4,
+  },
+  avatarOverlay: {
+    position: "absolute", inset: 0,
+    background: "#00000077", borderRadius: "50%",
+    display: "flex", alignItems: "center",
+    justifyContent: "center", fontSize: 22,
+  },
+  profileUsername: {
+    textAlign: "center", fontSize: 13,
+    color: "var(--text-secondary)", marginTop: -8,
+  },
+  profileField: {
+    display: "flex", flexDirection: "column", gap: 6,
+  },
+  profileLabel: {
+    fontSize: 10, fontWeight: 500, letterSpacing: "0.08em",
+    textTransform: "uppercase", color: "var(--text-secondary)",
+  },
+  profileInput: {
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    borderRadius: 10, padding: "10px 14px",
+    color: "var(--text-primary)",
+    fontSize: 13, fontFamily: "'Sora', sans-serif", outline: "none",
+  },
+  profileSaveBtn: {
+    background: "var(--accent)", color: "#0d0f14",
+    border: "none", borderRadius: 10, padding: "11px",
+    fontFamily: "'Sora', sans-serif", fontWeight: 600,
+    fontSize: 14, cursor: "pointer", marginTop: 4,
   },
 };
 

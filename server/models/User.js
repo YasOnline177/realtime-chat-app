@@ -11,6 +11,21 @@ const userSchema = new mongoose.Schema({
         type: String, 
         required: true
     },
-});
+
+    bio: {
+        type: String,
+        default: ""
+    },
+
+    status: {
+        type: String,
+        default: ""
+    },
+
+    avatarUrl: {
+        type: String,
+        default: ""
+    },
+}, { timestamps: true });
 
 module.exports = mongoose.model("User", userSchema);
